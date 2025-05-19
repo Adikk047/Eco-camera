@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Реальный Эко-Сканер</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.16.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
+  <style>
+    body {
+      text-align: center;
+      font-family: Arial, sans-serif;
+      background: #f0fdf4;
+      padding: 20px;
+    }
+    video {
+      max-width: 90%;
+      border-radius: 12px;
+      border: 3px solid #333;
+    }
+    button {
+      margin-top: 15px;
+      padding: 12px 20px;
+      font-size: 16px;
+      background-color: #00a86b;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    #result {
+      margin-top: 20px;
+      font-size: 18px;
+      background: white;
+      padding: 15px;
+      border-radius: 10px;
+      border: 1px solid #ccc;
+      display: none;
+      text-align: left;
+      max-width: 400px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>♻️ Эко-Сканер 2.0</h1>
+  <p>Наведи камеру на мусор и нажми "Сканировать"</p>
+
+  <video id="video" autoplay playsinline width="400" height="300"></video><br>
+  <button onclick="classify()">🔍 Сканировать</button>
+  <div id="result">Загрузка модели...</div>
+
+  <script>
+    const video = document.getElementById('video');
+    const result = document.getElementById('result');
+    let model;
+
+    // Информация по материалам: контейнер и переработка (на казахском)
+    const materialInfo = {
+      plastic: {
+        container: "Көк түсті немесе арнайы пластик қалдықтар контейнері",
+        recycling: "Пластик сұрыпталып, жуылып, балқытылып, жаңа өнімдерге айналады (мысалы, бөтелкелер, пакеттер)."
+      },
+      paper: {
+        container: "Жасыл түсті немесе қағаз қалдықтар контейнері",
+        recycling: "Қағаз сұрыпталып, ұсақталып, қайта өңдеуге жіберіледі, жаңа қағаз өнімдері жасалады."
+      },
+      glass: {
+        container: "Жасыл түсті немесе шыны қалдықтар контейнері",
+        recycling: "Шыны балқытылып, жаңа бөтелкелер мен ыдыстарға айналады."
+      },
+      metal: {
+        container: "Сары түсті немесе металл қалдықтар контейнері",
+        recycling: "Металл сұрыпталып, балқытылып, жаңа металл өнімдерге айналады."
+      },
+      cardboard: {
+        container: "Жасыл түсті немесе қағаз-қалдықтар контейнері",
+        recycling: "Картон ұсақталып, қайта өңдеуге жіберіледі, жаңа картон өнімдері жасалады."
+      },
+      organic: {
+        container: "Қоңыр түсті немесе органикалық қалдықтар контейнері",
+        recycling: "Органикалық қалдықтар компостқа айналып, топырақ тыңайтқышы ретінде қолданылады."
+      },
+      other: {
+        container: "Қара түсті немесе аралас қалдықтар контейнері",
+        recycling: "Аралас қалдықтар көбіне қайта өңделмейді, арнайы полигондарға көміледі."
+      }
+    };
+
+    // Функция для выбора ключа материала по названию (с упрощением)
+    function detectMaterial(name) {
+      name = name.toLowerCase();
+
+      if (name.includes("plastic") || name.includes("bottle") || name.includes("pack")) return "plastic";
+      if (name.includes("paper") || name.includes("notebook") || name.includes("envelope")) return "paper";
+      if (name.includes("glass") || name.includes("jar") || name.includes("bottle")) return "glass";
+      if (name.includes("metal") || name.includes("can") || name.includes("tin")) return "metal";
+      if (name.includes("cardboard") || name.includes("box")) return "cardboard";
+      if (name.includes("banana") || name.includes("apple") || name.includes("food") || name.includes("organic")) return "organic";
+      // Если не понятно — считаем прочим
+      return "other";
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: "environment" } },
+          audio: false
+        });
+        video.srcObject = stream;
+      } catch (e) {
+        alert("Не удалось получить доступ к камере.");
+        console.error(e);
+      }
+    }
+
+    async function loadModel() {
+      model = await mobilenet.load();
+      result.innerText = "✅ Модель загружена. Готов к сканированию.";
+    }
+
+    async function classify() {
+      if (!model) {
+        alert("Модель ещё не загружена. Подождите.");
+        return;
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0);
+
+      const predictions = await model.classify(canvas);
+
+      if (predictions.length === 0) {
+        result.style.display = "block";
+        result.innerHTML = "❌ Ничего не обнаружено. Попробуйте ещё раз.";
+        return;
+      }
+
+      // Берём первый (самый уверенный) результат
+      const best = predictions[0];
+      const materialKey = detectMaterial(best.className);
+
+      // Инфа по материалу
+      const info = materialInfo[materialKey];
+
+      result.style.display = "block";
+      result.innerHTML = `
+        <strong>🧠 Обнаружено:</strong> ${best.className} (${(best.probability * 100).toFixed(2)}%)<br><br>
+        <strong>♻️ Қай контейнерге тастау керек:</strong> ${info.container}<br><br>
+        <strong>🔄 Қалай қайта өңделеді:</strong> ${info.recycling}
+      `;
+    }
+
+    startCamera();
+    loadModel();
+  </script>
+
+</body>
+</html>
